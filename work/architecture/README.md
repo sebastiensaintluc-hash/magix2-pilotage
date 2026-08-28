@@ -4,3 +4,4 @@ Livrables Magix2 pour ce rôle (design authority). Fichiers ici, pas seulement d
 
 - Budget de perf proto 1 : [`BUDGET-PERF-PROTO1.md`](BUDGET-PERF-PROTO1.md)
 - Go / no-go proto 1 : [`GO-NOGO-PROTO1.md`](GO-NOGO-PROTO1.md)
+- 8 Go vs suite (ToF, 360/BEV, Co-Pilot) : [`GO-NOGO-8GO-SUITE.md`](GO-NOGO-8GO-SUITE.md)
