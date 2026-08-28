@@ -1,7 +1,16 @@
 # Magix2 — spec logicielle proto 1 (ROS 2 Jazzy)
 
-Cible : NVIDIA Jetson Orin Nano Super 8 Go, JetPack 7.2 / Ubuntu 24.04.
-Open source uniquement. Dépôt : après validation de cette spec.
+Cible : NVIDIA Jetson Orin Nano Super 8 Go, JetPack 7.2 / Ubuntu 24.04, mode **25 W**, rootfs **NVMe** (pas de SD).
+Open source uniquement. Headless. RMW : **CycloneDDS**.
+
+GO AD conditionnel proto 1 — contraintes figées :
+- GPU / CUDA **off** indoor (pas d’Isaac, pas de YOLO, pas de depth, pas de NVENC)
+- UVC **MJPEG 640×480 @ 15 fps**, zéro transcode
+- `slam_toolbox` **async**, résolution **5 cm**
+- Nav2 **2D**, pas d’AMCL, pas de voxel layer
+- Interdit on-device : RViz, x264, rootfs SD
+- RAM visée **4,8–5,5 / 8 Go**
+- `safety` = seul publisher de `/cmd_vel`
 
 Hors proto 1 : écriture R-Net, détection de marches, SLAM visuel, depth, YOLO, Isaac ROS.
 
@@ -77,7 +86,8 @@ Pas d’écriture CAN / R-Net. Backend `rnet` = stub.
 - Port : `/dev/tty-ld19` (udev `by-id`, jamais `ttyUSB0` en dur)
 - Baud : 230400
 - Topic : `/scan` (`sensor_msgs/LaserScan`), `frame_id`: `laser_link`
-- SLAM : `slam_toolbox` sur `/scan` uniquement
+- SLAM : `slam_toolbox` async, 5 cm, sur `/scan` uniquement (pas de SLAM visuel)
+- Nav2 : 2D, pose via slam_toolbox, **pas d’AMCL**, **pas de voxel**
 
 Moteurs Yahboom : `/dev/tty-motors`, 115200, proto `$mtype:1#` / `$speed:G,0,D,0#`.
 
@@ -92,7 +102,7 @@ Moteurs Yahboom : `/dev/tty-motors`, 115200, proto `$mtype:1#` / `$speed:G,0,D,0
 - Empattement : à calibrer (12–16 cm) à réception
 - IMU BNO085 : I2C1, adresse `0x4A`, 3,3 V ; bus Linux au `i2cdetect` ; fallback UART-RVC
 
-UVC : `usb_cam`, RGB compressé vers le PC. Depth / Depth-Anything : launch à part, GPU off en indoor.
+UVC : `usb_cam` MJPEG 640×480@15, topic compressé vers le PC, pas de raw→x264, pas de NVENC. Depth / Depth-Anything : hors indoor, GPU off.
 
 ---
 
