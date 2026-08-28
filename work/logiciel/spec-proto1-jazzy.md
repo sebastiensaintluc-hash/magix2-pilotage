@@ -71,7 +71,7 @@ Règles :
 
 1. Timeout heartbeat **> 500 ms** → Twist zéro, latch jusqu’à 3 heartbeats valides d’affilée.
 2. `command == STOP` → Twist zéro immédiat, latch jusqu’à `CANCEL` ou nouvel ordre non-STOP.
-3. E-stop matériel (coupure VIN moteurs) : `safety` passe en fault, Twist zéro logiciel en plus.
+3. Kill banc : débrancher le pack 3S / T-plug (coupe VIN moteurs). Jetson reste sur brick 19 V. Pas d’e-stop matériel proto 1.
 4. Lidar muet **> 1 s** → Twist zéro (pas de nav aveugle).
 5. Zéro publication `/cmd_vel` autre que `safety`. Nav2 écrit `/cmd_vel_raw`.
 
@@ -111,7 +111,7 @@ UVC : `usb_cam` MJPEG 640×480@15, topic compressé vers le PC, pas de raw→x26
 - `/scan` live + `slam_toolbox` construit une carte
 - UVC stream sur le PC
 - BNO085 I2C1
-- E-stop coupe la traction
+- Débrancher le pack 3S coupe la traction (pas d’e-stop matériel)
 - Coupure WiFi / heartbeat → Twist 0 (bloquant)
 - Ordre `GOTO_NAMED` / `GOTO_POSE` depuis UI ou voix
 
