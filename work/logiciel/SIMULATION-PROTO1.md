@@ -63,6 +63,10 @@ Installation : `sudo apt install ros-jazzy-ros-gz ros-jazzy-gz-ros2-control ros-
 
 Le jour où on attaque les **marches et les trous** : physique de contact et capteurs depth y comptent, et c'est là que Gazebo creuse l'écart. Choisir Gazebo maintenant évite précisément d'avoir à redéménager le monde, l'URDF et les launch à ce moment-là.
 
+### Et pour du RL ?
+
+Gazebo n'est **pas** un outil d'entraînement : trop lent de deux ordres de grandeur. Le partage entraînement / validation / cible, et le budget 8 Go d'une politique apprise, sont traités à part dans [`../architecture/GO-NOGO-RL.md`](../architecture/GO-NOGO-RL.md). Le rôle de Gazebo y reste celui de cette note : brancher, pas apprendre.
+
 ---
 
 ## 3. Où ça tourne — veto Jetson
