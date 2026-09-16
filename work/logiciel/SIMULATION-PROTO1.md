@@ -20,7 +20,7 @@ Ce que la simulation **n'est pas** dans ce projet :
 - pas quelque chose qui tourne sur la Jetson — §3 ;
 - pas un modèle du Magix II 6 roues. On simule la **platine 2WD**, rien d'autre. Un jumeau numérique du fauteuil est hors proto 1, comme le 6WD physique.
 
-Coût licence : 0 € dans les deux cas (Gazebo Apache 2.0, Webots Apache 2.0). Le coût réel est du temps d'ingénieur et un PC avec un GPU qui tient OpenGL.
+Coût licence : 0 € dans les deux cas (Gazebo Apache 2.0, Webots Apache 2.0). Le coût réel est du temps d'ingénieur et une machine capable de faire tourner le rendu des capteurs — sur un PC de supervision Mac M2 Max, ça veut dire une VM Linux, cf. §3.
 
 ---
 
@@ -81,6 +81,31 @@ Les deux ont besoin d'un moteur de rendu pour les capteurs simulés (lidar GPU, 
 | Jetson | **éteinte**, ou n'importe quoi sauf un simulateur |
 
 En simulation, tout le graphe robot migre sur le PC. On ne teste donc **pas** le budget RAM/CPU Jetson : ça reste la mesure du premier boot, §10 du budget de perf.
+
+### Le PC de supervision est un Mac M2 Max — conséquences
+
+Ça ne change pas le choix du simulateur, ça change **où il tourne**. Le blocage n'est pas Gazebo, c'est ROS 2 : Jazzy est **Tier 1 sur Ubuntu 24.04, amd64 et arm64**, et **Tier 3 sur macOS, amd64 seulement** — Apple Silicon n'est même pas dans le Tier 3 officiel. Des builds communautaires natifs existent, ils ne sont pas une base de projet.
+
+**Gazebo natif sur Apple Silicon est éliminé pour une raison factuelle, pas par prudence :** macOS n'autorise la création du contexte Metal que sur le thread principal, or `gz-sensors` le crée ailleurs. Résultat rapporté sur Harmonic 8.10 en environnement Jazzy : `gz sim -s` se bloque au chargement du monde et **aucune donnée capteur n'est jamais produite**. Notre besoin, c'est le lidar. Un Gazebo sans capteurs ne sert à rien ici.
+
+Webots n'offre pas d'échappatoire non plus : `webots_ros2_driver` en conteneur ne se connecte pas au simulateur tournant sur l'hôte macOS (issue `cyberbotics/webots_ros2` #888), et Cyberbotics a **lui-même basculé de Docker vers des VM UTM** pour ROS 2 + Webots sur macOS. Les deux simulateurs convergent donc vers la même réponse.
+
+**Décision : tout dans une VM Ubuntu 24.04 arm64 (UTM, backend Apple Virtualization).**
+
+| Poste | Choix |
+|---|---|
+| Hôte | macOS, M2 Max |
+| VM | Ubuntu 24.04 **arm64**, ROS 2 Jazzy (Tier 1), Gazebo Harmonic, Nav2, `magix2_safety` |
+| Rendu | logiciel (pas de passthrough GPU Metal → Linux) |
+| Natif macOS | le gym 2D d'entraînement (Python pur, aucun GPU) — cf. [`../architecture/GO-NOGO-RL.md`](../architecture/GO-NOGO-RL.md) |
+
+Deux conséquences, une bonne et une mauvaise.
+
+**Bonne :** la VM est en **arm64, comme la Jetson**. Ce qui compile, se résout en dépendances et casse dans la VM casse pareil sur l'Orin. Un portable Linux x86 ne donnerait pas ça. Le Mac passe de handicap à léger atout sur la parité de build.
+
+**Mauvaise :** pas d'accélération GPU dans la VM, donc le `gpu_lidar` passe en rendu logiciel. Pour ~450 faisceaux à 10 Hz dans une pièce unique, ça devrait tenir — **à vérifier au premier jour**, c'est cinq minutes de test et ça conditionne la suite. Si ça ne tient pas, on réduit la résolution du monde avant de réduire le lidar. Ajouter une caméra simulée dans cette VM : non.
+
+**Plafond d'évolutivité, à connaître maintenant :** le M2 Max est une impasse **définitive** pour Isaac Lab, qui exige CUDA et des RT Cores. Si l'entraînement RL sur Isaac devient réel (cf. `GO-NOGO-RL.md` §4), c'est une machine x86 + RTX ou du GPU cloud, jamais ce Mac. Le gym 2D, lui, tourne nativement sur le Mac sans rien demander.
 
 ---
 
@@ -218,6 +243,7 @@ Décision à prendre : est-ce qu'on investit les quelques jours de setup. Mon av
 - Gazebo Classic EOL 31/01/2025 ; Harmonic supporté jusqu'en 09/2028 — [Open Robotics Discourse](https://discourse.openrobotics.org/t/gazebo-classic-11-has-reached-end-of-life/48458)
 - Nav2 Jazzy sur le Gazebo moderne — [Nav2 quickstart Jazzy](https://docs.nav2.org/jazzy/getting_started/quickstart/quickstart/)
 - Rendu headless EGL, `--headless-rendering` — [Gazebo Sim: Headless Rendering](https://gazebosim.org/api/sim/9/headless_rendering.html)
+- macOS / Apple Silicon : Jazzy Tier 3 amd64 seulement, Ubuntu 24.04 arm64 Tier 1 — [Release Jazzy Jalisco](https://github.com/ros2/ros2_documentation/blob/rolling/source/Releases/Release-Jazzy-Jalisco.rst) ; contexte Metal hors thread principal, capteurs muets — [gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877), [#2441](https://github.com/gazebosim/gz-sim/issues/2441) ; Webots : driver en conteneur non connecté à l'hôte macOS — [webots_ros2 #888](https://github.com/cyberbotics/webots_ros2/issues/888), bascule Docker → UTM — [ROS Discourse](https://discourse.ros.org/t/webots-ros-2-now-compatible-with-rviz-on-macos-using-utm-vms/29849)
 - Repli Webots : `webots_ros2` publié dans Jazzy — [index.ros.org](https://index.ros.org/p/webots_ros2/) ; `webots_ros2_control` maintenu — [index.ros.org](https://index.ros.org/p/webots_ros2_control/) ; Xvfb obligatoire — [cyberbotics/webots #5007](https://github.com/cyberbotics/webots/discussions/5007)
 - `use_sim_time` + `/clock` avec `slam_toolbox` et Nav2 — [Husarion](https://husarion.com/tutorials/vulcanexus/webots-rosbot-xl/)
 - Contraintes internes : `work/architecture/BUDGET-PERF-PROTO1.md` §4, §5, §7 ; `work/tests/criteres-proto1.md` ; `docs/SPEC-PROTO1.md` §3, §4, §5
