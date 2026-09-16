@@ -88,7 +88,16 @@ En simulation, tout le graphe robot migre sur le PC. On ne teste donc **pas** le
 
 **Gazebo natif sur Apple Silicon est éliminé pour une raison factuelle, pas par prudence :** macOS n'autorise la création du contexte Metal que sur le thread principal, or `gz-sensors` le crée ailleurs. Résultat rapporté sur Harmonic 8.10 en environnement Jazzy : `gz sim -s` se bloque au chargement du monde et **aucune donnée capteur n'est jamais produite**. Notre besoin, c'est le lidar. Un Gazebo sans capteurs ne sert à rien ici.
 
-Webots n'offre pas d'échappatoire non plus : `webots_ros2_driver` en conteneur ne se connecte pas au simulateur tournant sur l'hôte macOS (issue `cyberbotics/webots_ros2` #888), et Cyberbotics a **lui-même basculé de Docker vers des VM UTM** pour ROS 2 + Webots sur macOS. Les deux simulateurs convergent donc vers la même réponse.
+**Webots, lui, a un vrai chemin macOS — et c'est son meilleur argument sur cette machine.** La doc ROS 2 Jazzy porte une page *Installation (macOS)* dédiée à Webots ; il n'existe pas d'équivalent Gazebo. L'architecture officielle : **Webots natif sur macOS**, donc **accélération 3D matérielle réelle**, et une VM UTM qui fait tourner toute la partie ROS (RViz compris), reliée à l'hôte par TCP pour lancer Webots plus un dossier partagé (`WEBOTS_SHARED_FOLDER=<hôte>:<VM>`) pour transférer les mondes et les ressources.
+
+C'est le seul des deux qui obtient des **capteurs rendus par le GPU** sur un Mac. Il faut le dire clairement : sur le premier jour, Webots est plus simple ici.
+
+Ce que ça coûte, en revanche :
+
+- La VM reste nécessaire **dans les deux cas** — Webots ne l'économise pas, il déplace seulement le simulateur de l'autre côté de la frontière.
+- Le couplage hôte ↔ VM entre dans le chemin critique : TCP + un dossier partagé dont le chemin doit coller des deux côtés. Chemin documenté, mais pas sans frictions : un utilisateur suivant le tutoriel officiel avec Ubuntu neuf sous UTM sur M2 rapporte une absence de communication Webots ↔ ROS 2 dans l'invité (issue #990). En conteneur, ça ne marche carrément pas (#888) — d'où la bascule de Cyberbotics vers UTM.
+- On perd la parité `ros2_control` du §2, qui est la raison pour laquelle Gazebo avait gagné.
+- Les données capteur et `/clock` traversent une frontière de VM, ce qui ajoute latence et gigue **là où la simulation peut déjà mentir** (§5, watchdogs). C'est la mauvaise direction pour la seule chose qu'on tient vraiment à tester.
 
 **Décision : tout dans une VM Ubuntu 24.04 arm64 (UTM, backend Apple Virtualization).**
 
@@ -103,7 +112,22 @@ Deux conséquences, une bonne et une mauvaise.
 
 **Bonne :** la VM est en **arm64, comme la Jetson**. Ce qui compile, se résout en dépendances et casse dans la VM casse pareil sur l'Orin. Un portable Linux x86 ne donnerait pas ça. Le Mac passe de handicap à léger atout sur la parité de build.
 
-**Mauvaise :** pas d'accélération GPU dans la VM, donc le `gpu_lidar` passe en rendu logiciel. Pour ~450 faisceaux à 10 Hz dans une pièce unique, ça devrait tenir — **à vérifier au premier jour**, c'est cinq minutes de test et ça conditionne la suite. Si ça ne tient pas, on réduit la résolution du monde avant de réduire le lidar. Ajouter une caméra simulée dans cette VM : non.
+**Mauvaise :** pas d'accélération GPU dans la VM, donc le `gpu_lidar` passe en rendu logiciel (llvmpipe). Ajouter une caméra simulée dans cette VM : non.
+
+### La mesure qui tranche, à faire en premier
+
+Gazebo contre Webots sur ce Mac **ne se décide pas au raisonnement** : ça dépend d'un chiffre qu'on n'a pas encore.
+
+**Test :** dans la VM, `gpu_lidar` 450 faisceaux à 10 Hz, monde d'une pièce, rendu logiciel. Est-ce que `/scan` sort à 10 Hz stables avec du CPU en réserve ?
+
+| Résultat | Décision |
+|---|---|
+| Tient | **Gazebo**, comme prévu. L'avantage de rendu de Webots ne vaut rien pour proto 1, la parité `ros2_control` tranche. |
+| Ne tient pas | **Webots natif sur l'hôte** + VM UTM. On accepte de perdre la parité `ros2_control` et on documente le couplage hôte/VM comme risque. |
+
+Une demi-journée, avant d'écrire quoi que ce soit d'autre. Si le test échoue, d'abord réduire la taille du monde ; si ça ne suffit toujours pas, basculer.
+
+Deuxième déclencheur de bascule, inchangé : plus de deux jours perdus sur `gz_ros2_control` (§2, piège 2).
 
 **Plafond d'évolutivité, à connaître maintenant :** le M2 Max est une impasse **définitive** pour Isaac Lab, qui exige CUDA et des RT Cores. Si l'entraînement RL sur Isaac devient réel (cf. `GO-NOGO-RL.md` §4), c'est une machine x86 + RTX ou du GPU cloud, jamais ce Mac. Le gym 2D, lui, tourne nativement sur le Mac sans rien demander.
 
@@ -243,7 +267,7 @@ Décision à prendre : est-ce qu'on investit les quelques jours de setup. Mon av
 - Gazebo Classic EOL 31/01/2025 ; Harmonic supporté jusqu'en 09/2028 — [Open Robotics Discourse](https://discourse.openrobotics.org/t/gazebo-classic-11-has-reached-end-of-life/48458)
 - Nav2 Jazzy sur le Gazebo moderne — [Nav2 quickstart Jazzy](https://docs.nav2.org/jazzy/getting_started/quickstart/quickstart/)
 - Rendu headless EGL, `--headless-rendering` — [Gazebo Sim: Headless Rendering](https://gazebosim.org/api/sim/9/headless_rendering.html)
-- macOS / Apple Silicon : Jazzy Tier 3 amd64 seulement, Ubuntu 24.04 arm64 Tier 1 — [Release Jazzy Jalisco](https://github.com/ros2/ros2_documentation/blob/rolling/source/Releases/Release-Jazzy-Jalisco.rst) ; contexte Metal hors thread principal, capteurs muets — [gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877), [#2441](https://github.com/gazebosim/gz-sim/issues/2441) ; Webots : driver en conteneur non connecté à l'hôte macOS — [webots_ros2 #888](https://github.com/cyberbotics/webots_ros2/issues/888), bascule Docker → UTM — [ROS Discourse](https://discourse.ros.org/t/webots-ros-2-now-compatible-with-rviz-on-macos-using-utm-vms/29849)
+- macOS / Apple Silicon : Jazzy Tier 3 amd64 seulement, Ubuntu 24.04 arm64 Tier 1 — [Release Jazzy Jalisco](https://github.com/ros2/ros2_documentation/blob/rolling/source/Releases/Release-Jazzy-Jalisco.rst) ; contexte Metal hors thread principal, capteurs muets — [gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877), [#2441](https://github.com/gazebosim/gz-sim/issues/2441) ; Webots sur macOS, chemin officiel (Webots natif + VM UTM, `WEBOTS_SHARED_FOLDER`) — [ROS 2 Jazzy, Installation (macOS)](https://docs.ros.org/en/jazzy/Tutorials/Advanced/Simulators/Webots/Installation-MacOS.html), [ROS Discourse](https://discourse.ros.org/t/webots-ros-2-now-compatible-with-rviz-on-macos-using-utm-vms/29849) ; frictions rapportées — [webots_ros2 #888](https://github.com/cyberbotics/webots_ros2/issues/888) (conteneur), [#990](https://github.com/cyberbotics/webots_ros2/issues/990) (UTM sur M2)
 - Repli Webots : `webots_ros2` publié dans Jazzy — [index.ros.org](https://index.ros.org/p/webots_ros2/) ; `webots_ros2_control` maintenu — [index.ros.org](https://index.ros.org/p/webots_ros2_control/) ; Xvfb obligatoire — [cyberbotics/webots #5007](https://github.com/cyberbotics/webots/discussions/5007)
 - `use_sim_time` + `/clock` avec `slam_toolbox` et Nav2 — [Husarion](https://husarion.com/tutorials/vulcanexus/webots-rosbot-xl/)
 - Contraintes internes : `work/architecture/BUDGET-PERF-PROTO1.md` §4, §5, §7 ; `work/tests/criteres-proto1.md` ; `docs/SPEC-PROTO1.md` §3, §4, §5
